@@ -29,6 +29,75 @@ function main() {
                 return vecScale(summation, 1 / arguments.length);
         }
 
+        // TYPES
+        const rollMapping = (k) => {
+                return Math.floor(k / 6) + k + 1;
+        }
+
+        const typeMapping = [
+                ["ore", "gray"],
+                ["wheat", "yellow"],
+                ["brick", "red"],
+                ["wood", "green"],
+                ["wool", "orange"]
+        ]
+        
+
+        const tileLookup = {};
+        class Tile {
+                constructor(location) {
+                        this.location = location;
+                        this.type = Math.floor(Math.random() * typeMapping.length);
+                        this.typeString = typeMapping[this.type][0];
+                        this.rollValue = rollMapping(Math.floor(Math.random() * 10) + 1);
+                        console.log(this.type, this.rollValue);
+
+                        tileLookup[this.rollValue] = tileLookup[this.rollValue] ?? [];
+                        tileLookup[this.rollValue].push(this);
+                }
+
+                draw() {
+                        
+
+                        drawHex(...this.location, radius, typeMapping[this.type][1]);
+
+                        context.fillStyle = "black";
+                        context.font = "30px Arial";
+                        context.textBaseline = "middle";
+                        context.textAlign = "center";
+                        context.fillText(this.rollValue.toString(), ...this.location);
+                }
+        }
+
+        class Settlement {
+                constructor(closeTile1, closeTile2, closeTile3) {
+                        this.location = vecMidpoint(closeTile1.location, closeTile2.location, closeTile3.location);
+                        this.touching = [];
+                }
+
+                draw() {
+                        drawCircle(this.location, radius / 4, "yellow");
+                }
+        }
+
+        class Road {
+                constructor(closeTile1, closeTile2, farTile1, farTile2) {
+                        this.startingPoint = vecMidpoint(closeTile1.location, closeTile2.location, farTile1.location);
+                        this.endingPoint = vecMidpoint(closeTile1.location, closeTile2.location, farTile2.location);
+                        this.closeTiles = [closeTile1, closeTile2, farTile1, farTile2];
+                }
+
+                draw() {
+                        context.beginPath();
+                        context.strokeStyle = "blue";
+                        context.lineWidth = radius / 4;
+                        context.moveTo(...this.startingPoint);
+                        context.lineTo(...this.endingPoint);
+                        context.stroke();
+                }
+        }
+
+
         // BOARD INITIALIZATION
         let canvasCenter = [canvas.width / 2, canvas.height / 2]
         let v1 = [1, 0];
@@ -84,61 +153,30 @@ function main() {
         hexagonCenterPoints.push(...invalidPoints)
 
 
-        let board = {locations: hexagonCenterPoints};
-        board.locations = board.locations.map((location, i) => {
-                if (i >= validPointIndexBoundary) { // invalid hexagons
-                        context.fillStyle = "red"
-                } else {
-                        // context.fillStyle = "black";
-                        // context.font = "30px Arial";
-                        // context.fillText(i.toString(), ...location);
-                        drawHex(...location, radius);
-                }
-                
-
-                return location
-        })
+        let board = {}
+        board.tiles = [];
+        for (let i = 0; i < validPointIndexBoundary; ++i) {
+                board.tiles.push(new Tile(hexagonCenterPoints[i]))
+        }       
         board.roads = [];
         board.settlements = [];
-
-        // TYPES
-        class Road {
-                constructor(closePoint1, closePoint2, farPoint1, farPoint2) {
-                        this.startingPoint = vecMidpoint(closePoint1, closePoint2, farPoint1);
-                        this.endingPoint = vecMidpoint(closePoint1, closePoint2, farPoint2);
-                }
-
-                draw() {
-                        context.beginPath();
-                        context.strokeStyle = "blue";
-                        context.lineWidth = radius / 4;
-                        context.moveTo(...this.startingPoint);
-                        context.lineTo(...this.endingPoint);
-                        context.stroke();
-                }
-        }
-
-        class Settlement {
-                constructor(closePoint1, closePoint2, closePoint3) {
-                        this.location = vecMidpoint(closePoint1, closePoint2, closePoint3);
-                }
-
-                draw() {
-                        drawCircle(this.location, radius / 4, "yellow");
-                }
-        }
+        console.log(board.tiles);
 
         
         // DRAWING FUNCTIONS
-        function drawHex(x, y, r) {
+        function drawHex(x, y, r, color = "white") {
                 let angle = (2 * Math.PI) / 6;
                 rot = angle / 2; // centers the top
 
                 context.beginPath();
+                context.lineWidth = 1;
+                context.strokeStyle = "black";
+                context.fillStyle = color;
                 for (let i = 0; i <= 6; ++i) {
                         context.lineTo(x + r * Math.cos(angle * i + rot), y + r * Math.sin(angle * i + rot));
                 }
-                context.stroke()
+                context.fill();
+                context.stroke();
         }
 
         function drawCircle(a, r = 2, color = "black") {
@@ -156,19 +194,18 @@ function main() {
                 let closeConnections = [];
                 let action = "nothing";
 
-
-                for (let i = 0; i < board.locations.length; ++i) {
-                        let dist = vecDist(clickedPoint, board.locations[i]);
+                for (let i = 0; i < board.tiles.length; ++i) {
+                        let dist = vecDist(clickedPoint, board.tiles[i].location);
 
                         if (dist < clickableRadius && i < validPointIndexBoundary) {
                                 // clicked in the middle of one of the hexagons
                                 action = "clickedCenter"
-                                closeConnections = [{dist, location: board.locations[i]}];
+                                closeConnections = [{dist, tile: board.tiles[i]}];
                                 break;
                         }
                         
                         if (dist < diameter) {                              
-                                closeConnections.push({dist, location: board.locations[i]});
+                                closeConnections.push({dist, tile: board.tiles[i]});
                         }
                 }
 
@@ -180,7 +217,7 @@ function main() {
                         action = "settlement";
                 }
 
-                return {action, connections: closeConnections.map((connection) => connection.location)};
+                return {action, tiles: closeConnections.map((connection) => connection.tile)};
         }
 
 
@@ -192,15 +229,14 @@ function main() {
                 let interpretation = interpretClick(clickedPoint);
 
                 if (interpretation.action == "road") {
-                        board.roads.push(new Road(...interpretation.connections));
+                        board.roads.push(new Road(...interpretation.tiles));
                 }
 
                 if (interpretation.action == "settlement") {
-                        board.settlements.push(new Settlement(...interpretation.connections));
+                        board.settlements.push(new Settlement(...interpretation.tiles));
                 }
                 
         })
-
 
         // MAIN LOOP
         let prevT = 0;
@@ -209,8 +245,7 @@ function main() {
                 prevT = t;
 
                 context.clearRect(0, 0, canvas.width, canvas.height);
-                board.locations.forEach((location, index) => index < validPointIndexBoundary &&
-                                                             drawHex(...location, radius));
+                board.tiles.forEach((tile, index) => index < validPointIndexBoundary && tile.draw())
                 board.roads.forEach((road) => road.draw());
                 board.settlements.forEach((settlement) => settlement.draw());
                 requestAnimationFrame(mainLoop);
